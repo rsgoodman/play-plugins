@@ -30,7 +30,12 @@ class RedisCacheApi @Inject()(val namespace: String, sedisPool: Pool, classLoade
           val bytes = Base64Coder.decode(data.last)
           data.head match {
             case "oos" => Some(withObjectInputStream(bytes)(_.readObject().asInstanceOf[T]))
-            case "string" => Some(withDataInputStream(bytes)(_.readUTF().asInstanceOf[T]))
+	    // original version
+            //case "string" => Some(withDataInputStream(bytes)(_.readUTF().asInstanceOf[T]))
+	    // use object serialization
+            //case "string" => Some(withObjectInputStream(bytes)(_.readObject().asInstanceOf[T]))
+            // use as a normal string
+            case "string" => Some( new String(bytes,"UTF-8").asInstanceOf[T])
             case "int" => Some(withDataInputStream(bytes)(_.readInt().asInstanceOf[T]))
             case "long" => Some(withDataInputStream(bytes)(_.readLong().asInstanceOf[T]))
             case "boolean" => Some(withDataInputStream(bytes)(_.readBoolean().asInstanceOf[T]))
@@ -63,9 +68,22 @@ class RedisCacheApi @Inject()(val namespace: String, sedisPool: Pool, classLoade
     try {
       val baos = new ByteArrayOutputStream()
       val prefix = value match {
-        case _: String =>
+        // Original version
+        /*case _: String =>
           dos = new DataOutputStream(baos)
           dos.writeUTF(value.asInstanceOf[String])
+          "string"*/
+        // Use as object
+        /*case _: String =>
+          oos = new ObjectOutputStream(baos)
+          oos.writeObject(value)
+          oos.flush()
+          "string"*/
+        // Use as normal string
+        case _: String =>
+          dos = new DataOutputStream(baos)
+          //dos.write(value.length())
+	  dos.write(value.asInstanceOf[String].getBytes())
           "string"
         case _: Int =>
           dos = new DataOutputStream(baos)
