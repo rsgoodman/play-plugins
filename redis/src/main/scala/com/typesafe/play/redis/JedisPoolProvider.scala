@@ -1,12 +1,16 @@
 package com.typesafe.play.redis
 
 import java.net.URI
-import javax.inject.{Provider, Inject, Singleton}
 
+import javax.inject.{Inject, Provider, Singleton}
 import org.apache.commons.lang3.builder.ReflectionToStringBuilder
 import play.api.inject.ApplicationLifecycle
-import play.api.{Logger, Configuration}
+import play.api.{Configuration, Logger}
 import redis.clients.jedis.{JedisPool, JedisPoolConfig}
+import redis.clients.util.JedisURIHelper
+import javax.net.ssl._
+import java.security.cert.X509Certificate
+import java.security.SecureRandom
 
 import scala.concurrent.Future
 
@@ -14,34 +18,64 @@ import scala.concurrent.Future
 class JedisPoolProvider @Inject()(config: Configuration, lifecycle: ApplicationLifecycle) extends Provider[JedisPool]{
 
   lazy val logger = Logger("redis.module")
+
+
+
   lazy val get: JedisPool = {
     val jedisPool = {
-      val redisUri = config.getString("redis.uri").map(new URI(_))
+      val redisUri: Option[URI] = config.getString("redis.uri").map(new URI(_))
 
-      val host = config.getString("redis.host")
-        .orElse(redisUri.map(_.getHost))
-        .getOrElse("localhost")
-
-      val port = config.getInt("redis.port")
-        .orElse(redisUri.map(_.getPort).filter(_ != -1))
-        .getOrElse(6379)
-
-      val password = config.getString("redis.password")
-        .orElse(redisUri.map(_.getUserInfo).filter(_ != null).filter(_ contains ":").map(_.split(":", 2)(1)))
-        .orNull
+      val poolConfig = createPoolConfig(config)
 
       val timeout = config.getInt("redis.timeout")
         .getOrElse(2000)
 
-      val database = config.getInt("redis.database")
-        .getOrElse(0)
+      redisUri match {
+        case Some(uri) =>
 
-      val poolConfig = createPoolConfig(config)
-      Logger.info(s"Redis Plugin enabled. Connecting to Redis on $host:$port to $database with timeout $timeout.")
-      Logger.info("Redis Plugin pool configuration: " + new ReflectionToStringBuilder(poolConfig).toString)
+          // checking if SSL
+          val isSSL = redisUri.map(x => JedisURIHelper.isRedisSSLScheme(x))
+            .getOrElse(false)
 
+          //Check if validating ssl
+          val validateSSL = config.getBoolean("redis.validateSSL")
+            .getOrElse(false)
 
-      new JedisPool(poolConfig, host, port, timeout, password, database)
+          // Get all host validator
+          val allHostsValid: HostnameVerifier = if (!validateSSL && isSSL) createHostManager else null
+          // socket factory that will trust all certificates
+
+          val sslSocketFactory: SSLSocketFactory = if (!validateSSL && isSSL) {
+            val trustAllCerts = createTrustManager
+            val sc = SSLContext.getInstance("SSL")
+            sc.init(null, trustAllCerts, new SecureRandom)
+            // Socker factory that uses Trust manager
+            sc.getSocketFactory
+          } else {
+            null
+          }
+
+          val sslParameters = if (isSSL) new SSLParameters else null
+          new JedisPool(poolConfig, uri, timeout, sslSocketFactory, sslParameters, allHostsValid)
+
+        case None =>
+
+          val host = config.getString("redis.host")
+            .getOrElse("localhost")
+
+          val port = config.getInt("redis.port")
+            .getOrElse(6379)
+
+          val password = config.getString("redis.password")
+            .orNull
+
+          val database = config.getInt("redis.database")
+            .getOrElse(0)
+
+          new JedisPool(poolConfig, host, port, timeout, password, database)
+
+      }
+
     }
 
     logger.info("Starting Jedis Pool Provider")
@@ -70,5 +104,21 @@ class JedisPoolProvider @Inject()(config: Configuration, lifecycle: ApplicationL
     config.getBoolean("redis.pool.lifo").foreach(poolConfig.setLifo)
     config.getBoolean("redis.pool.blockWhenExhausted").foreach(poolConfig.setBlockWhenExhausted)
     poolConfig
+  }
+
+  private def createTrustManager(): Array[TrustManager] = {
+    Array[TrustManager](new X509TrustManager() {
+      def getAcceptedIssuers: Array[X509Certificate] = null
+
+      def checkClientTrusted(certs: Array[X509Certificate], authType: String): Unit = {}
+
+      def checkServerTrusted(certs: Array[X509Certificate], authType: String): Unit = {}
+    })
+  }
+
+  private def createHostManager(): HostnameVerifier = {
+    new HostnameVerifier() {
+      def verify(hostname: String, session: SSLSession) = true
+    }
   }
 }

@@ -13,3 +13,4 @@ framework/sbt/boot
 .history
 .idea
 RUNNING_PID
+*.iml

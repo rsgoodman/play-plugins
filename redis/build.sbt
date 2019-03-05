@@ -13,7 +13,9 @@ libraryDependencies ++= Seq(
   "com.typesafe.play"         %% "play-specs2"        % "2.5.3"     % "test",
   "com.typesafe.play"         %% "play-cache"         % "2.5.3",
   "biz.source_code"           %  "base64coder"        % "2010-12-19",
-  "org.sedis"                 %% "sedis"              % "1.2.2"
+  "org.sedis"                 %% "sedis"              % "1.2.2",
+  "redis.clients"             %  "jedis"              % "2.10.2"
+  
 )
 
 resolvers ++= Seq(
